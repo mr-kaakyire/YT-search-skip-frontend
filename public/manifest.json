@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Ad Skip & Search",
+  "version": "1.0.0",
+  "description": "Skip ads and search through YouTube video content",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "tabs",
+    "webNavigation",
+    "commands"
+  ],
+  "host_permissions": [
+    "https://*.youtube.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_start"
+    }
+  ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Q",
+        "mac": "Command+Q",
+        "chromeos": "Ctrl+Q",
+        "linux": "Ctrl+Q",
+        "windows": "Ctrl+Q"
+      },
+      "description": "Toggle transcript search"
+    }
+  },
+  "action": {
+    "default_popup": "index.html"
+  }
+}

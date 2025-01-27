@@ -1,0 +1,28 @@
+.ad-segment-highlight {
+  position: absolute;
+  height: 100%;
+  background-color: rgba(255, 255, 0, 0.5);
+  pointer-events: none;
+  z-index: 1;
+}
+
+#yt-transcript-search {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+#yt-transcript-search input {
+  font-size: 14px;
+  outline: none;
+}
+
+#yt-transcript-search input:focus {
+  border-color: #1a73e8;
+}
+
+#yt-transcript-search .result-item {
+  transition: background-color 0.2s;
+}
+
+#yt-transcript-search .result-item:hover {
+  background-color: #f0f0f0;
+}
