@@ -1,3 +1,7 @@
+// Current video state
+let currentVideoData = null;
+let currentVideoId = null;
+
 // Function to seek to time
 function seekToTime(timeInSeconds) {
   console.log('Seeking to time:', timeInSeconds);
@@ -8,12 +12,49 @@ function seekToTime(timeInSeconds) {
   }
 
   try {
-    video.currentTime = timeInSeconds;
-    video.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    video.currentTime = parseFloat(timeInSeconds);
+    video.play();
     return true;
   } catch (error) {
     console.error('Error seeking to time:', error);
     return false;
+  }
+}
+
+// Function to get current video ID
+function getCurrentVideoId() {
+  const url = new URL(window.location.href);
+  return url.searchParams.get('v');
+}
+
+// Function to request video data
+function requestVideoData(videoId, force = false) {
+  const action = force ? 'forceRefresh' : 'getVideoData';
+  chrome.runtime.sendMessage({
+    action: action,
+    videoId: videoId
+  });
+}
+
+// Function to handle video data update
+function handleVideoDataUpdate(data) {
+  currentVideoData = data;
+  
+  if (data.adSegments) {
+    highlightAdSegments(data.adSegments);
+  }
+  
+  if (data.transcript) {
+    // Update UI or store transcript for search
+    updateSearchUI();
+  }
+}
+
+// Function to update search UI
+function updateSearchUI() {
+  const searchContainer = document.querySelector('#yt-adskip-search');
+  if (!searchContainer) {
+    createSearchUI();
   }
 }
 
@@ -22,81 +63,47 @@ function searchTranscript(query) {
   console.log('Searching transcript for:', query);
   
   if (!currentVideoData?.transcript) {
-    console.warn('No transcript available');
-    searchUI.results.innerHTML = '<div class="no-results">No transcript available</div>';
-    return;
+    console.error('No transcript data available');
+    return [];
   }
 
-  const results = currentVideoData.transcript.filter(item => 
-    item.text.toLowerCase().includes(query.toLowerCase())
-  );
+  const results = currentVideoData.transcript
+    .filter(item => item.text.toLowerCase().includes(query.toLowerCase()))
+    .map(item => ({
+      text: item.text,
+      timestamp: parseFloat(item.start),
+      end: parseFloat(item.start) + parseFloat(item.duration)
+    }));
 
-  console.log('Raw transcript items:', results);
-
-  if (results.length === 0) {
-    searchUI.results.innerHTML = '<div class="no-results">No results found</div>';
-    return;
+  if (results.length > 0) {
+    clearHighlights(); // Clear existing highlights
+    highlightSearchResults(results); // Highlight new results
   }
 
-  searchUI.results.innerHTML = results.map(item => {
-    const timestamp = item.start || item.offset;
-    console.log('Item timestamp:', { start: item.start, offset: item.offset, final: timestamp });
-    
-    return `
-    <div class="result-item" style="
-      padding: 12px;
-      border-bottom: 1px solid #eee;
-      cursor: pointer;
-      transition: background-color 0.2s;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    " onclick="window.postMessage({ type: 'SEEK_TO_TIME', timeSeconds: ${timestamp} }, '*')" 
-      onmouseover="this.style.backgroundColor='#f5f5f5'" 
-      onmouseout="this.style.backgroundColor='transparent'">
-      <div style="
-        background: #065fd4;
-        color: white;
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-size: 12px;
-        min-width: 60px;
-        text-align: center;
-      ">${formatTime(timestamp)}</div>
-      <div style="flex: 1;">${item.text}</div>
-    </div>
-  `}).join('');
+  return results;
 }
 
-// Handle messages from background script
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log('Content script received message:', request);
+// Function to get video ID from URL
+function getVideoId(url) {
+  const urlParams = new URLSearchParams(new URL(url).search);
+  return urlParams.get('v');
+}
 
-  if (request.action === 'toggleSearch') {
-    console.log('Raw transcript data:', JSON.stringify(request.videoData.transcript, null, 2));
-    currentVideoData = request.videoData;
-    toggleSearch();
-  }
-  else if (request.action === 'highlightAdSegments') {
-    console.log('Highlighting ad segments:', request.adSegments);
-    highlightAdSegments(request.adSegments);
-  }
-});
+// Function to check if we're on a video page
+function isVideoPage() {
+  return window.location.pathname === '/watch' && getVideoId(window.location.href);
+}
 
-// Function to highlight ad segments
+// Function to highlight ad segments on the progress bar
 function highlightAdSegments(adSegments) {
-  console.log('Highlighting ad segments:', adSegments);
-  
-  if (!adSegments || adSegments.length === 0) {
-    console.warn('No ad segments to highlight');
+  if (!adSegments || adSegments.length === 0) return;
+
+  // Find the progress bar container
+  const progressBar = document.querySelector('.ytp-timed-markers-container');
+  if (!progressBar) {
+    console.warn('Progress bar not found');
     return;
   }
-
-  const progressBar = findProgressBar();
-  if (!progressBar) return;
-
-  // Remove existing highlights
-  document.querySelectorAll('.ad-segment-highlight').forEach(el => el.remove());
 
   // Get video duration
   const video = document.querySelector('video');
@@ -104,6 +111,9 @@ function highlightAdSegments(adSegments) {
     console.warn('Video element or duration not found');
     return;
   }
+
+  // Remove any existing highlights
+  document.querySelectorAll('.ad-segment-highlight').forEach(el => el.remove());
 
   // Create container for highlights if it doesn't exist
   let highlightContainer = document.querySelector('.ad-segments-container');
@@ -123,12 +133,10 @@ function highlightAdSegments(adSegments) {
   }
 
   // Add highlights for each ad segment
-  adSegments.forEach((segment, index) => {
+  adSegments.forEach(segment => {
     const startPercent = (segment.start / video.duration) * 100;
     const endPercent = (segment.end / video.duration) * 100;
     const width = endPercent - startPercent;
-
-    console.log(`Adding highlight ${index + 1}:`, { start: segment.start, end: segment.end, startPercent, endPercent });
 
     const highlight = document.createElement('div');
     highlight.className = 'ad-segment-highlight';
@@ -140,20 +148,237 @@ function highlightAdSegments(adSegments) {
       background-color: yellow;
       opacity: 0.5;
       pointer-events: none;
+      z-index: 26;
     `;
 
     highlightContainer.appendChild(highlight);
   });
 }
 
-// Listen for messages
+// Function to create tooltip element
+function createTooltip() {
+    const tooltip = document.createElement('div');
+    tooltip.style.position = 'absolute';
+    tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+    tooltip.style.color = 'white';
+    tooltip.style.padding = '8px';
+    tooltip.style.borderRadius = '4px';
+    tooltip.style.fontSize = '12px';
+    tooltip.style.zIndex = '9999';
+    tooltip.style.pointerEvents = 'none';
+    tooltip.style.display = 'none';
+    document.body.appendChild(tooltip);
+    return tooltip;
+}
+
+// Function to format time in MM:SS format
+function formatTimeForTooltip(seconds) {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.floor(seconds % 60);
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+}
+
+// Function to highlight segments on YouTube progress bar
+function highlightYouTubeProgress(startTime, endTime, color = "yellow", tooltipText = "") {
+    const markersContainer = document.querySelector(".ytp-timed-markers-container");
+    const video = document.querySelector("video");
+
+    if (!markersContainer || !video) return console.error("YouTube elements not found");
+
+    // Calculate positions
+    const duration = video.duration;
+    if (!duration) return console.error("Video duration not available");
+
+    const startPercent = (startTime / duration) * 100;
+    const endPercent = (endTime / duration) * 100;
+    const widthPercent = endPercent - startPercent;
+
+    // Create highlight element
+    const highlight = document.createElement("div");
+    highlight.style.position = "absolute";
+    highlight.style.left = `${startPercent}%`;
+    highlight.style.width = `${widthPercent}%`;
+    highlight.style.height = "100%";
+    highlight.style.backgroundColor = color;
+    highlight.style.opacity = "0.6";
+    highlight.style.pointerEvents = "auto"; // Enable hover events
+    highlight.style.cursor = "pointer";
+
+    // Add click handler for seeking
+    highlight.addEventListener('click', (e) => {
+        e.stopPropagation(); // Prevent event from bubbling to YouTube's progress bar
+        const time = parseFloat(startTime);
+        console.log('Highlight clicked, seeking to:', time);
+        chrome.runtime.sendMessage({ action: 'seekToTime', time: time });
+    });
+
+    // Create tooltip if text is provided
+    if (tooltipText) {
+        const tooltip = createTooltip();
+        
+        highlight.addEventListener('mouseover', (e) => {
+            tooltip.textContent = tooltipText;
+            tooltip.style.display = 'block';
+            
+            // Position tooltip above the highlight
+            const rect = highlight.getBoundingClientRect();
+            tooltip.style.left = `${rect.left + (rect.width / 2) - (tooltip.offsetWidth / 2)}px`;
+            tooltip.style.top = `${rect.top - tooltip.offsetHeight - 8}px`;
+        });
+
+        highlight.addEventListener('mousemove', (e) => {
+            // Update tooltip position on mouse move
+            tooltip.style.left = `${e.clientX - (tooltip.offsetWidth / 2)}px`;
+            tooltip.style.top = `${e.clientY - tooltip.offsetHeight - 8}px`;
+        });
+
+        highlight.addEventListener('mouseout', () => {
+            tooltip.style.display = 'none';
+        });
+    }
+
+    // Append to timeline container
+    markersContainer.appendChild(highlight);
+    return highlight;
+}
+
+// Function to clear all highlights
+function clearHighlights() {
+    const markersContainer = document.querySelector(".ytp-timed-markers-container");
+    if (!markersContainer) return;
+    
+    // Remove all highlight elements
+    const highlights = markersContainer.querySelectorAll("div[style*='position: absolute']");
+    highlights.forEach(highlight => highlight.remove());
+}
+
+// Function to highlight ad segments
+function highlightAdSegments(adSegments) {
+    clearHighlights(); // Clear existing highlights
+    if (!adSegments || !Array.isArray(adSegments)) return;
+    
+    adSegments.forEach(segment => {
+        if (segment.start && segment.end) {
+            const startFormatted = formatTimeForTooltip(segment.start);
+            const endFormatted = formatTimeForTooltip(segment.end);
+            const tooltipText = `Ad Segment: ${startFormatted} - ${endFormatted}`;
+            highlightYouTubeProgress(segment.start, segment.end, "yellow", tooltipText);
+        }
+    });
+}
+
+// Function to highlight search results
+function highlightSearchResults(results) {
+    if (!results || !Array.isArray(results)) return;
+    
+    results.forEach(result => {
+        if (result.timestamp || result.start) {
+            const startTime = result.timestamp || result.start;
+            const endTime = result.end || (startTime + 5); // Default 5 second highlight if no end time
+            const tooltipText = `Found: "${result.text}"`;
+            highlightYouTubeProgress(startTime, endTime, "yellow", tooltipText);
+        }
+    });
+}
+
+// Cache management
+function getCachedVideoData(videoId) {
+  try {
+    const cached = localStorage.getItem(`yt-adskip-${videoId}`);
+    if (!cached) return null;
+
+    const { data, timestamp } = JSON.parse(cached);
+    // Cache expires after 24 hours
+    if (Date.now() - timestamp > 24 * 60 * 60 * 1000) {
+      localStorage.removeItem(`yt-adskip-${videoId}`);
+      return null;
+    }
+    return data;
+  } catch (error) {
+    console.error('Error reading from cache:', error);
+    return null;
+  }
+}
+
+function cacheVideoData(videoId, data) {
+  try {
+    const cacheData = {
+      timestamp: Date.now(),
+      data: data
+    };
+    localStorage.setItem(`yt-adskip-${videoId}`, JSON.stringify(cacheData));
+  } catch (error) {
+    console.error('Error writing to cache:', error);
+  }
+}
+
+// Clean up old cache entries
+function cleanupCache() {
+  try {
+    const keys = Object.keys(localStorage);
+    const now = Date.now();
+    keys.forEach(key => {
+      if (key.startsWith('yt-adskip-')) {
+        try {
+          const cached = JSON.parse(localStorage.getItem(key));
+          if (now - cached.timestamp > 24 * 60 * 60 * 1000) {
+            localStorage.removeItem(key);
+          }
+        } catch (error) {
+          // If the item is invalid JSON, remove it
+          localStorage.removeItem(key);
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error cleaning cache:', error);
+  }
+}
+
+// Function to handle video page load
+async function handleVideoLoad() {
+  const videoId = getCurrentVideoId();
+  if (!videoId) return;
+
+  if (videoId !== currentVideoId) {
+    currentVideoId = videoId;
+    requestVideoData(videoId);
+  }
+}
+
+// Listen for messages from background script
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log('Content script received message:', request);
+
+  if (request.action === 'updateVideoData' && request.videoData) {
+    handleVideoDataUpdate(request.videoData);
+  }
+});
+
+// Listen for page navigation
+let lastUrl = location.href;
+new MutationObserver(() => {
+  if (location.href !== lastUrl) {
+    lastUrl = location.href;
+    if (isVideoPage()) {
+      console.log('New video page detected');
+      handleVideoLoad();
+    }
+  }
+}).observe(document, { subtree: true, childList: true });
+
+// Initial load check
+if (isVideoPage()) {
+  console.log('Video page detected on initial load');
+  handleVideoLoad();
+}
+
+// Handle window messages
 window.addEventListener('message', (event) => {
   if (event.source !== window) return;
   
   if (event.data.type === 'SEEK_TO_TIME' && event.data.timeSeconds !== undefined) {
-    const timestamp = event.data.timeSeconds;
-    console.log('Seeking to timestamp:', timestamp);
-    seekToTime(timestamp);
+    seekToTime(event.data.timeSeconds);
   }
 });
 
@@ -284,7 +509,6 @@ function createSearchUI() {
 
 // Initialize search UI elements
 const searchUI = createSearchUI();
-let currentVideoData = null;
 
 // Function to toggle search
 function toggleSearch() {
@@ -442,6 +666,75 @@ function clearExpiredBrowserCache() {
   window.postMessage({ type: 'CLEAR_EXPIRED' }, '*');
 }
 
+// Function to handle video page load
+async function handleVideoLoad() {
+  const videoId = getCurrentVideoId();
+  if (!videoId) return;
+
+  if (videoId !== currentVideoId) {
+    currentVideoId = videoId;
+    requestVideoData(videoId);
+  }
+}
+
+// Listen for messages from background script
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log('Content script received message:', request);
+
+  if (request.action === 'toggleSearch') {
+    currentVideoData = request.videoData;
+    if (request.videoData.adSegments) {
+      highlightAdSegments(request.videoData.adSegments);
+    }
+    toggleSearch();
+  }
+  else if (request.action === 'seekToTime' && request.time) {
+    seekToTime(request.time);
+  }
+});
+
+// Handle window messages
+window.addEventListener('message', (event) => {
+  if (event.source !== window) return;
+  
+  if (event.data.type === 'SEEK_TO_TIME') {
+    seekToTime(event.data.timeSeconds);
+  }
+});
+
+// Function to find YouTube progress bar
+function findProgressBar() {
+  const selectors = [
+    '.ytp-progress-bar-container',
+    '.ytp-progress-bar',
+    '#movie_player .ytp-progress-bar',
+    '.html5-video-player .ytp-progress-bar'
+  ];
+  
+  for (const selector of selectors) {
+    const element = document.querySelector(selector);
+    if (element) {
+      console.log('Found progress bar with selector:', selector);
+      return element;
+    }
+  }
+  console.warn('Progress bar not found');
+  return null;
+}
+
+// Function to format time
+function formatTime(seconds) {
+  const totalSeconds = Math.floor(seconds);
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainingSeconds = totalSeconds % 60;
+  const hours = Math.floor(minutes / 60);
+  
+  if (hours > 0) {
+    return `${hours}:${String(minutes % 60).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
+  }
+  return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
+}
+
 // Initialize extension
 async function initializeExtension() {
   console.log('Initializing extension');
@@ -476,21 +769,6 @@ async function initializeExtension() {
   setupVideoPlayerMonitor();
   clearExpiredBrowserCache();
 }
-
-// Handle messages from background script
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log('Content script received message:', request);
-
-  if (request.action === 'toggleSearch') {
-    console.log('Raw transcript data:', JSON.stringify(request.videoData.transcript, null, 2));
-    currentVideoData = request.videoData;
-    toggleSearch();
-  }
-  else if (request.action === 'highlightAdSegments') {
-    console.log('Highlighting ad segments:', request.adSegments);
-    highlightAdSegments(request.adSegments);
-  }
-});
 
 // Monitor for video player and changes
 function setupVideoPlayerMonitor() {
@@ -548,18 +826,24 @@ function setupVideoEventListeners(video) {
   });
 }
 
-// Start initialization
-console.log('Content script loaded');
-initializeExtension();
+// Initialize
+function initialize() {
+  cleanupCache();
+  if (isVideoPage()) {
+    console.log('Video page detected on initial load');
+    handleVideoLoad();
+  }
+}
+
+initialize();
 
 // Handle URL changes (for single-page app navigation)
-let lastUrl = location.href;
+lastUrl = location.href;
 new MutationObserver(() => {
-  const url = location.href;
-  if (url !== lastUrl) {
-    console.log('URL changed:', url);
-    lastUrl = url;
-    initializeExtension();
+  if (location.href !== lastUrl) {
+    console.log('URL changed:', location.href);
+    lastUrl = location.href;
+    initialize();
   }
 }).observe(document, { subtree: true, childList: true });
 

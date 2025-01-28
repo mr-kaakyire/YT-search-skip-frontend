@@ -1,68 +1,78 @@
-// Store video data
-let currentVideoData = {
-  videoId: null,
-  transcript: null,
-  adSegments: null
-};
+// Store current video data in memory
+let currentVideoData = null;
+let lastVideoId = null;
 
-// Function that will be injected to highlight ad segments
-const highlightAdSegments = (adSegments) => {
-  // Find the progress bar
-  const progressBar = document.querySelector('.ytp-progress-bar');
-  if (!progressBar) return false;
-
-  // Get video duration
-  const video = document.querySelector('video');
-  if (!video) return false;
-
-  const duration = video.duration;
-  if (!duration) return false;
-
-  // Remove existing highlights
-  const existingHighlights = document.querySelectorAll('.ad-segment-highlight');
-  existingHighlights.forEach(el => el.remove());
-
-  // Create highlights for each ad segment
-  adSegments.forEach(segment => {
-    const startPercent = (segment.start / duration) * 100;
-    const endPercent = (segment.end / duration) * 100;
-    
-    const highlight = document.createElement('div');
-    highlight.className = 'ad-segment-highlight';
-    highlight.style.cssText = `
-      position: absolute;
-      height: 100%;
-      background-color: rgba(255, 255, 0, 0.5);
-      pointer-events: none;
-      z-index: 1;
-      left: ${startPercent}%;
-      width: ${endPercent - startPercent}%;
-    `;
-    
-    progressBar.appendChild(highlight);
-  });
-
-  return true;
-};
-
-// Function to seek to specific time
-const skipToTimeFunction = (time) => {
-  const video = document.querySelector('video');
-  if (!video) return false;
-
+// Cache management functions
+async function getCachedVideoData(videoId) {
   try {
-    video.currentTime = time;
-    return true;
+    const data = await chrome.storage.local.get(videoId);
+    if (!data[videoId]) return null;
+
+    // Check if cache is expired (24 hours)
+    const cacheEntry = data[videoId];
+    const now = Date.now();
+    if (now - cacheEntry.timestamp > 24 * 60 * 60 * 1000) {
+      // Cache expired, remove it
+      await chrome.storage.local.remove(videoId);
+      return null;
+    }
+    
+    return cacheEntry.data;
   } catch (error) {
-    console.error('Error seeking to time:', error);
-    return false;
+    console.error('Error reading from cache:', error);
+    return null;
   }
-};
+}
+
+async function cacheVideoData(videoId, data) {
+  try {
+    const cacheEntry = {
+      timestamp: Date.now(),
+      data: data
+    };
+    await chrome.storage.local.set({ [videoId]: cacheEntry });
+  } catch (error) {
+    console.error('Error writing to cache:', error);
+  }
+}
+
+// Clean up old cache entries periodically (every hour)
+setInterval(async () => {
+  try {
+    const storage = await chrome.storage.local.get(null);
+    const now = Date.now();
+    const keysToRemove = Object.keys(storage).filter(key => {
+      const entry = storage[key];
+      return now - entry.timestamp > 24 * 60 * 60 * 1000;
+    });
+    if (keysToRemove.length > 0) {
+      await chrome.storage.local.remove(keysToRemove);
+    }
+  } catch (error) {
+    console.error('Error cleaning cache:', error);
+  }
+}, 60 * 60 * 1000);
 
 // Function to fetch video data
-async function fetchVideoData(videoId) {
+async function fetchVideoData(videoId, force = false) {
   try {
-    console.log('Fetching data for video:', videoId);
+    // If we already have data for this video and not forcing refresh, return it
+    if (!force && videoId === lastVideoId && currentVideoData) {
+      console.log('Using in-memory data for video:', videoId);
+      return currentVideoData;
+    }
+
+    // First check cache
+    const cachedData = await getCachedVideoData(videoId);
+    if (cachedData) {
+      console.log('Cache hit for video:', videoId);
+      currentVideoData = cachedData;
+      lastVideoId = videoId;
+      return cachedData;
+    }
+
+    // If not in cache, fetch from server
+    console.log('Cache miss for video:', videoId);
     const response = await fetch('http://localhost:3000/analyze-video', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -74,38 +84,13 @@ async function fetchVideoData(videoId) {
     if (!response.ok) throw new Error('Failed to fetch video data');
     
     const data = await response.json();
-    console.log('Received from backend:', {
-      firstTranscriptItem: data.transcript[0],
-      transcriptLength: data.transcript.length,
-      adSegments: data.adSegments
-    });
     
-    currentVideoData = {
-      videoId,
-      transcript: data.transcript,
-      adSegments: data.adSegments
-    };
-
-    console.log('Stored in currentVideoData:', {
-      firstTranscriptItem: currentVideoData.transcript[0],
-      transcriptLength: currentVideoData.transcript.length,
-      adSegments: currentVideoData.adSegments
-    });
-
-    // Send message to content script to highlight ad segments
-    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-      if (!tabs[0]?.id) return;
-      
-      try {
-        console.log('Sending to content script:', currentVideoData);
-        await chrome.tabs.sendMessage(tabs[0].id, {
-          action: 'toggleSearch',
-          videoData: currentVideoData
-        });
-      } catch (error) {
-        console.error('Failed to send data to content script:', error);
-      }
-    });
+    // Cache the response
+    await cacheVideoData(videoId, data);
+    
+    // Update memory cache
+    currentVideoData = data;
+    lastVideoId = videoId;
 
     return data;
   } catch (error) {
@@ -114,86 +99,92 @@ async function fetchVideoData(videoId) {
   }
 }
 
-// Function to extract video ID from URL
-function getVideoId(url) {
+// Function to send data to content script
+async function sendDataToContentScript(tabId, data) {
   try {
-    const urlObj = new URL(url);
-    return urlObj.searchParams.get('v');
-  } catch {
-    return null;
+    await chrome.tabs.sendMessage(tabId, {
+      action: 'updateVideoData',
+      videoData: data
+    });
+  } catch (error) {
+    console.error('Error sending data to content script:', error);
   }
 }
 
-// Listen for installation
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('Extension installed');
-});
-
 // Listen for tab updates
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url?.includes('youtube.com/watch')) {
-    const videoId = getVideoId(tab.url);
-    if (videoId && videoId !== currentVideoData.videoId) {
-      fetchVideoData(videoId);
+    const videoId = new URL(tab.url).searchParams.get('v');
+    if (!videoId) return;
+
+    const data = await fetchVideoData(videoId);
+    if (data) {
+      await sendDataToContentScript(tabId, data);
     }
   }
 });
 
-// Listen for messages
+// Listen for messages from content script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log('Background received message:', request);
+  console.log('Background script received message:', request);
 
   if (request.action === 'getVideoData') {
-    sendResponse(currentVideoData);
-    return false;
-  }
-  
-  if (request.action === 'initializeVideo') {
     const videoId = request.videoId;
-    if (videoId && videoId !== currentVideoData.videoId) {
-      console.log('Initializing video:', videoId);
-      fetchVideoData(videoId);
-    }
-    return false;
-  }
-  
-  if (request.action === 'skipToTime') {
-    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-      if (!tabs[0]?.id) {
-        sendResponse({ success: false, error: 'No active tab found' });
+    
+    // First check cache
+    getCachedVideoData(videoId).then(cachedData => {
+      if (cachedData) {
+        console.log('Cache hit for video:', videoId);
+        sendResponse(cachedData);
         return;
       }
+      
+      // If not in cache, fetch from server
+      console.log('Cache miss for video:', videoId);
+      fetchVideoData(videoId).then(data => {
+        if (data) {
+          sendResponse(data);
+        }
+      });
+    });
+    
+    return true; // Required for async response
+  }
 
+  if (request.action === 'forceRefresh') {
+    const videoId = request.videoId;
+    fetchVideoData(videoId, true).then(data => {
+      if (data && sender.tab?.id) {
+        sendDataToContentScript(sender.tab.id, data);
+      }
+    });
+    return true;
+  }
+
+  if (request.action === 'toggleSearch') {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      if (!tabs[0]?.id) return;
+      
       try {
-        const results = await chrome.scripting.executeScript({
-          target: { tabId: tabs[0].id },
-          func: skipToTimeFunction,
-          args: [request.time]
+        await chrome.tabs.sendMessage(tabs[0].id, {
+          action: 'toggleSearch',
+          videoData: currentVideoData
         });
-
-        sendResponse({ success: results[0]?.result || false });
       } catch (error) {
-        console.error('Script execution error:', error);
-        sendResponse({ 
-          success: false, 
-          error: error.message || 'Failed to execute script'
-        });
+        console.error('Failed to toggle search:', error);
       }
     });
     return true;
   }
 });
 
-// Listen for keyboard shortcuts
-chrome.commands.onCommand.addListener((command) => {
-  if (command === 'toggle_search') {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (!tabs[0]?.id) return;
-      
-      chrome.tabs.sendMessage(tabs[0].id, {
-        action: 'toggleSearch',
-        videoData: currentVideoData
-      });
-    });
-  }
+// Service Worker setup
+self.addEventListener('install', (event) => {
+  console.log('Service Worker installing...');
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  console.log('Service Worker activating...');
+  event.waitUntil(clients.claim());
 });

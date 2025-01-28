@@ -8,13 +8,16 @@
     "scripting",
     "tabs",
     "webNavigation",
-    "commands"
+    "commands",
+    "storage"
   ],
   "host_permissions": [
-    "https://*.youtube.com/*"
+    "https://*.youtube.com/*",
+    "http://localhost:3000/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "content_scripts": [
     {
