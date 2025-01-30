@@ -176,6 +176,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
   }
+
+  if (request.action === 'skipToTime') {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      if (!tabs[0]?.id) {
+        sendResponse({ success: false, error: 'No active tab found' });
+        return;
+      }
+
+      try {
+        // Forward the message to content script
+        const response = await chrome.tabs.sendMessage(tabs[0].id, {
+          action: 'seekToTime',
+          time: request.time
+        });
+        sendResponse({ success: true });
+      } catch (error) {
+        console.error('Error in skip handler:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    });
+    return true; // Required for async sendResponse
+  }
 });
 
 // Service Worker setup

@@ -350,8 +350,20 @@ async function handleVideoLoad() {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log('Content script received message:', request);
 
-  if (request.action === 'updateVideoData' && request.videoData) {
-    handleVideoDataUpdate(request.videoData);
+  if (request.action === 'seekToTime' || request.action === 'skipToTime') {
+    console.log('Attempting to seek to time:', request.time);
+    const success = seekToTime(request.time);
+    console.log('Seek result:', success);
+    sendResponse({ success });
+    return true; // Keep the message channel open for async response
+  }
+
+  if (request.action === 'toggleSearch') {
+    currentVideoData = request.videoData;
+    if (request.videoData.adSegments) {
+      highlightAdSegments(request.videoData.adSegments);
+    }
+    toggleSearch();
   }
 });
 

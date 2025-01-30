@@ -12,22 +12,45 @@ function App() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    // Get current tab's URL when popup opens
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const currentUrl = tabs[0]?.url;
-      if (currentUrl?.includes('youtube.com/watch')) {
-        const urlObj = new URL(currentUrl);
-        const newVideoId = urlObj.searchParams.get('v');
+    const checkVideoAndCache = async () => {
+      try {
+        // Get current tab's URL when popup opens
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        const currentUrl = tabs[0]?.url;
         
-        // Only fetch transcript if video ID has changed
-        if (newVideoId && newVideoId !== videoId) {
-          setVideoUrl(currentUrl);
-          setVideoId(newVideoId);
-          fetchVideoData(currentUrl);
+        if (currentUrl?.includes('youtube.com/watch')) {
+          const urlObj = new URL(currentUrl);
+          const newVideoId = urlObj.searchParams.get('v');
+          
+          if (!newVideoId) return;
+          
+          // Check cache first
+          const cachedData = await chrome.storage.local.get(newVideoId);
+          if (cachedData[newVideoId]) {
+            console.log('Using cached data for video:', newVideoId);
+            setVideoUrl(currentUrl);
+            setVideoId(newVideoId);
+            setAdSegments(cachedData[newVideoId].data.adSegments || []);
+            setTranscript(cachedData[newVideoId].data.transcript || []);
+            return;
+          }
+          
+          // Only fetch if video ID changed and no cache
+          if (newVideoId !== videoId) {
+            console.log('Fetching new data for video:', newVideoId);
+            setVideoUrl(currentUrl);
+            setVideoId(newVideoId);
+            fetchVideoData(currentUrl);
+          }
         }
+      } catch (error) {
+        console.error('Error in checkVideoAndCache:', error);
+        setError('Failed to load video data');
       }
-    });
-  }, [videoId]); // Only re-run if videoId changes
+    };
+
+    checkVideoAndCache();
+  }, []); // Empty dependency array since we check videoId inside
 
   const fetchVideoData = async (url) => {
     try {
@@ -48,8 +71,18 @@ function App() {
 
       const data = await response.json();
       console.log('Analysis result:', data);
+      
+      // Cache the data
+      const videoId = new URL(url).searchParams.get('v');
+      await chrome.storage.local.set({
+        [videoId]: {
+          timestamp: Date.now(),
+          data: data
+        }
+      });
+      
       setAdSegments(data.adSegments || []);
-      setTranscript(data.transcript || []); // Store transcript locally
+      setTranscript(data.transcript || []);
     } catch (error) {
       console.error('Error analyzing video:', error);
       setError(error.message);
@@ -81,28 +114,31 @@ function App() {
   };
 
   const skipToTimestamp = (timestamp) => {
-    try {
-      chrome.runtime.sendMessage(
-        {
-          action: 'skipToTime',
-          time: timestamp
-        },
+    console.log('Attempting to skip to timestamp:', timestamp);
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (!tabs[0]?.id) {
+        console.error('No active tab found');
+        setError('No active YouTube tab found');
+        return;
+      }
+
+      chrome.tabs.sendMessage(
+        tabs[0].id,
+        { action: 'seekToTime', time: timestamp },
         (response) => {
           if (chrome.runtime.lastError) {
-            console.error('Error:', chrome.runtime.lastError);
+            console.error('Runtime error:', chrome.runtime.lastError);
             setError('Failed to communicate with YouTube page. Please refresh the page and try again.');
             return;
           }
 
           if (!response?.success) {
-            setError(response?.error || 'Failed to skip to timestamp. Please try again.');
+            console.error('Seek failed');
+            setError('Failed to skip to timestamp. Please try again.');
           }
         }
       );
-    } catch (error) {
-      console.error('Error skipping to timestamp:', error);
-      setError('An error occurred while trying to skip. Please try again.');
-    }
+    });
   };
 
   return (
