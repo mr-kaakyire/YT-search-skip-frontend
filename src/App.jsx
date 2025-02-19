@@ -11,10 +11,61 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // Function to highlight segments on the timeline
+  const highlightSegments = (segments, color) => {
+    console.log('Highlighting segments:', segments);
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (!tabs[0]?.id) {
+        console.error('No active tab found');
+        return;
+      }
+      
+      chrome.tabs.sendMessage(
+        tabs[0].id,
+        { 
+          action: 'highlightTimeline',
+          data: { segments, color }
+        },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('Error highlighting timeline:', chrome.runtime.lastError);
+          } else {
+            console.log('Highlight response:', response);
+          }
+        }
+      );
+    });
+  };
+
+  // Function to check cache and load data
+  const loadFromCache = async (videoId) => {
+    try {
+      const result = await chrome.storage.local.get(videoId);
+      if (result[videoId]) {
+        const cachedData = result[videoId];
+        const cacheAge = Date.now() - cachedData.timestamp;
+        
+        // Cache is valid for 24 hours
+        if (cacheAge < 24 * 60 * 60 * 1000) {
+          console.log('Using cached data for video:', videoId);
+          setAdSegments(cachedData.data.adSegments || []);
+          setTranscript(cachedData.data.transcript || []);
+          return true;
+        } else {
+          console.log('Cache expired for video:', videoId);
+          await chrome.storage.local.remove(videoId);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading from cache:', error);
+    }
+    return false;
+  };
+
+  // Effect to initialize extension and load data
   useEffect(() => {
-    const checkVideoAndCache = async () => {
+    const initializeExtension = async () => {
       try {
-        // Get current tab's URL when popup opens
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
         const currentUrl = tabs[0]?.url;
         
@@ -22,35 +73,28 @@ function App() {
           const urlObj = new URL(currentUrl);
           const newVideoId = urlObj.searchParams.get('v');
           
-          if (!newVideoId) return;
-          
-          // Check cache first
-          const cachedData = await chrome.storage.local.get(newVideoId);
-          if (cachedData[newVideoId]) {
-            console.log('Using cached data for video:', newVideoId);
+          if (newVideoId) {
             setVideoUrl(currentUrl);
             setVideoId(newVideoId);
-            setAdSegments(cachedData[newVideoId].data.adSegments || []);
-            setTranscript(cachedData[newVideoId].data.transcript || []);
-            return;
-          }
-          
-          // Only fetch if video ID changed and no cache
-          if (newVideoId !== videoId) {
-            console.log('Fetching new data for video:', newVideoId);
-            setVideoUrl(currentUrl);
-            setVideoId(newVideoId);
-            fetchVideoData(currentUrl);
+            
+            // Try to load from cache first
+            const hasCachedData = await loadFromCache(newVideoId);
+            
+            // If no cache or expired, fetch new data
+            if (!hasCachedData) {
+              console.log('Fetching new data for video:', newVideoId);
+              fetchVideoData(currentUrl);
+            }
           }
         }
       } catch (error) {
-        console.error('Error in checkVideoAndCache:', error);
-        setError('Failed to load video data');
+        console.error('Error initializing extension:', error);
+        setError('Failed to initialize extension');
       }
     };
 
-    checkVideoAndCache();
-  }, []); // Empty dependency array since we check videoId inside
+    initializeExtension();
+  }, []); // Only run when extension opens
 
   const fetchVideoData = async (url) => {
     try {
@@ -80,9 +124,19 @@ function App() {
           data: data
         }
       });
+      console.log('Cached data for video:', videoId);
       
       setAdSegments(data.adSegments || []);
       setTranscript(data.transcript || []);
+
+      // Highlight ad segments in yellow immediately after fetching
+      if (data.adSegments?.length > 0) {
+        const formattedSegments = data.adSegments.map(segment => ({
+          start: Number(segment.start),
+          end: Number(segment.end)
+        }));
+        highlightSegments(formattedSegments, 'yellow');
+      }
     } catch (error) {
       console.error('Error analyzing video:', error);
       setError(error.message);
@@ -93,20 +147,45 @@ function App() {
 
   const searchTranscript = (e) => {
     e.preventDefault();
-    const keyword = searchKeyword.trim();
+    const keyword = searchKeyword.trim().toLowerCase();
     if (!keyword) return;
     
     try {
       setError(null);
       console.log('Searching locally for:', keyword);
       
+      // Clear existing highlights first
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs[0]?.id) {
+          chrome.tabs.sendMessage(tabs[0].id, { action: 'clearHighlights' });
+        }
+      });
+      
       // Perform local search on transcript
       const matches = transcript.filter(item => 
-        item.text.toLowerCase().includes(keyword.toLowerCase())
+        item.text.toLowerCase().includes(keyword)
       );
 
       console.log('Found matches:', matches.length);
       setSearchResults(matches);
+
+      // First highlight ad segments in yellow
+      if (adSegments.length > 0) {
+        const adHighlights = adSegments.map(segment => ({
+          start: Number(segment.start),
+          end: Number(segment.end)
+        }));
+        highlightSegments(adHighlights, 'yellow');
+      }
+
+      // Then highlight search results in purple
+      if (matches.length > 0) {
+        const searchSegments = matches.map(match => ({
+          start: Number(match.offset),
+          end: Number(match.offset + match.duration)
+        }));
+        highlightSegments(searchSegments, '#8A2BE2'); // Purple color
+      }
     } catch (error) {
       console.error('Error searching transcript:', error);
       setError(error.message);

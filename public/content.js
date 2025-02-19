@@ -179,76 +179,54 @@ function formatTimeForTooltip(seconds) {
 }
 
 // Function to highlight segments on YouTube progress bar
-function highlightYouTubeProgress(startTime, endTime, color = "yellow", tooltipText = "") {
-    const markersContainer = document.querySelector(".ytp-timed-markers-container");
-    const video = document.querySelector("video");
+function highlightYouTubeProgress(startTime, endTime, color = "yellow") {
+    console.log('Highlighting segment:', { startTime, endTime, color });
+    
+    const progressBar = document.querySelector(".ytp-progress-bar");
+    if (!progressBar) {
+        console.error("YouTube progress bar not found");
+        return false;
+    }
 
-    if (!markersContainer || !video) return console.error("YouTube elements not found");
+    const video = document.querySelector("video");
+    if (!video) {
+        console.error("Video element not found");
+        return false;
+    }
+
+    const duration = video.duration;
+    if (!duration) {
+        console.error("Video duration not available");
+        return false;
+    }
 
     // Calculate positions
-    const duration = video.duration;
-    if (!duration) return console.error("Video duration not available");
-
     const startPercent = (startTime / duration) * 100;
     const endPercent = (endTime / duration) * 100;
     const widthPercent = endPercent - startPercent;
 
     // Create highlight element
     const highlight = document.createElement("div");
-    highlight.style.position = "absolute";
-    highlight.style.left = `${startPercent}%`;
-    highlight.style.width = `${widthPercent}%`;
-    highlight.style.height = "100%";
-    highlight.style.backgroundColor = color;
-    highlight.style.opacity = "0.6";
-    highlight.style.pointerEvents = "auto"; // Enable hover events
-    highlight.style.cursor = "pointer";
+    highlight.className = 'yt-adskip-highlight';
+    highlight.style.cssText = `
+        position: absolute;
+        left: ${startPercent}%;
+        width: ${widthPercent}%;
+        height: 100%;
+        background-color: ${color};
+        opacity: 0.5;
+        pointer-events: none;
+        z-index: 41;
+    `;
 
-    // Add click handler for seeking
-    highlight.addEventListener('click', (e) => {
-        e.stopPropagation(); // Prevent event from bubbling to YouTube's progress bar
-        const time = parseFloat(startTime);
-        console.log('Highlight clicked, seeking to:', time);
-        chrome.runtime.sendMessage({ action: 'seekToTime', time: time });
-    });
-
-    // Create tooltip if text is provided
-    if (tooltipText) {
-        const tooltip = createTooltip();
-        
-        highlight.addEventListener('mouseover', (e) => {
-            tooltip.textContent = tooltipText;
-            tooltip.style.display = 'block';
-            
-            // Position tooltip above the highlight
-            const rect = highlight.getBoundingClientRect();
-            tooltip.style.left = `${rect.left + (rect.width / 2) - (tooltip.offsetWidth / 2)}px`;
-            tooltip.style.top = `${rect.top - tooltip.offsetHeight - 8}px`;
-        });
-
-        highlight.addEventListener('mousemove', (e) => {
-            // Update tooltip position on mouse move
-            tooltip.style.left = `${e.clientX - (tooltip.offsetWidth / 2)}px`;
-            tooltip.style.top = `${e.clientY - tooltip.offsetHeight - 8}px`;
-        });
-
-        highlight.addEventListener('mouseout', () => {
-            tooltip.style.display = 'none';
-        });
-    }
-
-    // Append to timeline container
-    markersContainer.appendChild(highlight);
-    return highlight;
+    // Add highlight to progress bar
+    progressBar.appendChild(highlight);
+    return true;
 }
 
-// Function to clear all highlights
+// Function to clear existing highlights
 function clearHighlights() {
-    const markersContainer = document.querySelector(".ytp-timed-markers-container");
-    if (!markersContainer) return;
-    
-    // Remove all highlight elements
-    const highlights = markersContainer.querySelectorAll("div[style*='position: absolute']");
+    const highlights = document.querySelectorAll('.yt-adskip-highlight');
     highlights.forEach(highlight => highlight.remove());
 }
 
@@ -863,3 +841,77 @@ new MutationObserver(() => {
 searchUI.input.addEventListener('input', (e) => {
   searchTranscript(e.target.value);
 });
+
+// Listen for messages from popup
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log('Content script received message:', request);
+
+  if (request.action === 'seekToTime') {
+    console.log('Seeking to time:', request.time);
+    const success = seekToTime(request.time);
+    sendResponse({ success });
+    return true;
+  }
+
+  if (request.action === 'highlightTimeline') {
+    try {
+      const { segments, color } = request.data;
+      
+      // Ensure segments are properly formatted
+      const validSegments = segments
+        .map(segment => ({
+          start: Number(segment.start),
+          end: Number(segment.end)
+        }))
+        .filter(segment => !isNaN(segment.start) && !isNaN(segment.end));
+
+      console.log('Highlighting segments:', validSegments);
+      
+      const results = validSegments.map(segment => 
+        highlightYouTubeProgress(segment.start, segment.end, color)
+      );
+
+      sendResponse({ success: results.some(result => result) });
+    } catch (error) {
+      console.error('Error highlighting timeline:', error);
+      sendResponse({ success: false, error: error.message });
+    }
+    return true;
+  }
+
+  if (request.action === 'clearHighlights') {
+    try {
+      clearHighlights();
+      sendResponse({ success: true });
+    } catch (error) {
+      console.error('Error clearing highlights:', error);
+      sendResponse({ success: false, error: error.message });
+    }
+    return true;
+  }
+});
+
+// Re-apply highlights when video player updates
+const observer = new MutationObserver((mutations) => {
+  for (const mutation of mutations) {
+    if (mutation.type === 'childList' && mutation.target.classList.contains('ytp-progress-bar-container')) {
+      console.log('Progress bar updated, re-applying highlights');
+      // TODO: Store and re-apply current highlights
+    }
+  }
+});
+
+// Start observing the progress bar for changes
+function startObserving() {
+  const progressBar = document.querySelector('.ytp-progress-bar-container');
+  if (progressBar) {
+    observer.observe(progressBar, {
+      childList: true,
+      subtree: true
+    });
+    console.log('Started observing progress bar');
+  }
+}
+
+// Initialize when page loads
+startObserving();
