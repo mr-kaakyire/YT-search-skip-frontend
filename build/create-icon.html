@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Create Extension Icon</title>
+</head>
+<body>
+    <canvas id="canvas" width="16" height="16"></canvas>
+    <div id="output"></div>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Red background
+        ctx.fillStyle = '#FF0000';
+        ctx.fillRect(0, 0, 16, 16);
+        
+        // White hamburger lines
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(3, 4, 10, 1.5);  // Top line
+        ctx.fillRect(3, 7.25, 10, 1.5);  // Middle line
+        ctx.fillRect(3, 10.5, 10, 1.5);  // Bottom line
+        
+        // Get the image as PNG
+        const dataUrl = canvas.toDataURL('image/png');
+        
+        // Display the data URL
+        document.getElementById('output').textContent = dataUrl;
+        
+        // Also display the image
+        const img = new Image();
+        img.src = dataUrl;
+        document.body.appendChild(img);
+    </script>
+</body>
+</html> 
