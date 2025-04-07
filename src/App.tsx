@@ -4,11 +4,14 @@ import CssBaseline from '@mui/material/CssBaseline';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Switch from '@mui/material/Switch';
 import { SearchResults } from './components/SearchResults';
 import { SearchBar } from './components/SearchBar';
 import { AdMarker } from './components/AdMarker';
 import { useVideoData } from './utils/useVideoData';
 import { useThemeDetector } from './utils/useThemeDetector';
+import { AdSegment } from './utils/useVideoData';
 
 // Add global declarations
 declare global {
@@ -16,6 +19,7 @@ declare global {
     adSkipObserver?: MutationObserver;
     ytAdSkipSetup?: boolean;
     ytAdSkipContentLoaded?: boolean;
+    ytAdSkipAutoSkip?: boolean;
   }
 }
 
@@ -27,6 +31,7 @@ interface RefreshEvent extends CustomEvent {
 const App: React.FC = () => {
   const [videoId, setVideoId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [autoSkip, setAutoSkip] = useState<boolean>(false);
   const isYouTubeDark = useThemeDetector();
   
   const theme = createTheme({
@@ -62,6 +67,65 @@ const App: React.FC = () => {
     });
   }, [fetchData]);
 
+  // Load saved auto-skip setting on component mount
+  useEffect(() => {
+    chrome.storage.sync.get(['autoSkipEnabled'], (result) => {
+      if (result.autoSkipEnabled !== undefined) {
+        setAutoSkip(!!result.autoSkipEnabled);
+      }
+    });
+  }, []);
+
+  // Save auto-skip setting when it changes
+  useEffect(() => {
+    chrome.storage.sync.set({ autoSkipEnabled: autoSkip });
+  }, [autoSkip]);
+
+  // Update auto-skip setting in content script when changed
+  useEffect(() => {
+    if (videoId) {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tabId = tabs[0]?.id;
+        if (tabId) {
+          chrome.scripting.executeScript({
+            target: { tabId },
+            func: (shouldAutoSkip: boolean) => {
+              window.ytAdSkipAutoSkip = shouldAutoSkip;
+              
+              // Dispatch an event to notify any existing listeners
+              const event = new CustomEvent('yt-adskip-settings-changed', { 
+                detail: { autoSkip: shouldAutoSkip } 
+              });
+              document.dispatchEvent(event);
+            },
+            args: [autoSkip]
+          });
+        }
+      });
+    }
+  }, [autoSkip, videoId]);
+
+  useEffect(() => {
+    if (videoId) {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tabId = tabs[0]?.id;
+        if (tabId) {
+          // First inject the content script
+          chrome.scripting.executeScript({
+            target: { tabId },
+            files: ['content.js']
+          }).then(() => {
+            // Then send the auto-skip setting to the content script
+            chrome.tabs.sendMessage(tabId, {
+              action: 'setAutoSkip',
+              enabled: autoSkip
+            });
+          });
+        }
+      });
+    }
+  }, [autoSkip, videoId]);
+
   useEffect(() => {
     if (data?.adSegments && data.adSegments.length > 0) {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -72,10 +136,19 @@ const App: React.FC = () => {
             target: { tabId },
             files: ['content.js']
           }).then(() => {
+            // Send ad segments to content script
+            chrome.tabs.sendMessage(tabId, {
+              action: 'setAdSegments',
+              segments: data.adSegments
+            });
+            
             // Then inject the markers script with the ad segments data
             chrome.scripting.executeScript({
               target: { tabId },
-              func: (segments) => {
+              func: (segments: AdSegment[], shouldAutoSkip: boolean) => {
+                // Set auto-skip setting
+                window.ytAdSkipAutoSkip = shouldAutoSkip;
+                
                 // Function to inject markers - keep it super lightweight
                 const injectMarkers = () => {
                   // Only run when needed elements are available
@@ -94,7 +167,7 @@ const App: React.FC = () => {
                   const fragment = document.createDocumentFragment();
                   
                   // Create markers
-                  segments.forEach(segment => {
+                  segments.forEach((segment: AdSegment) => {
                     const marker = document.createElement('div');
                     marker.className = 'yt-adskip-marker';
                     
@@ -144,15 +217,24 @@ const App: React.FC = () => {
                   const checkAdSegment = () => {
                     const currentTime = video.currentTime;
                     const activeSegment = segments.find(
-                      segment => currentTime >= segment.start && currentTime < segment.end
+                      (segment: AdSegment) => currentTime >= segment.start && currentTime < segment.end
                     );
-                    
+
                     if (activeSegment) {
-                      skipButton.style.display = 'block';
-                      skipButton.onclick = () => {
+                      // Get the latest auto-skip setting
+                      const currentAutoSkip = window.ytAdSkipAutoSkip;
+                      
+                      // If auto-skip is enabled, skip immediately
+                      if (currentAutoSkip) {
                         video.currentTime = activeSegment.end;
                         skipButton.style.display = 'none';
-                      };
+                      } else {
+                        skipButton.style.display = 'block';
+                        skipButton.onclick = () => {
+                          video.currentTime = activeSegment.end;
+                          skipButton.style.display = 'none';
+                        };
+                      }
                     } else {
                       skipButton.style.display = 'none';
                     }
@@ -163,6 +245,15 @@ const App: React.FC = () => {
                   
                   // Start checking
                   timeoutId = window.setTimeout(checkAdSegment, 1000);
+                  
+                  // Listen for setting changes
+                  document.addEventListener('yt-adskip-settings-changed', () => {
+                    // Force immediate check after settings change
+                    if (timeoutId) {
+                      window.clearTimeout(timeoutId);
+                      timeoutId = window.setTimeout(checkAdSegment, 0);
+                    }
+                  });
                   
                   // Return cleanup function
                   return () => {
@@ -208,13 +299,13 @@ const App: React.FC = () => {
                   if (cleanup) cleanup();
                 });
               },
-              args: [data.adSegments]
+              args: [data.adSegments, autoSkip]
             });
           });
         }
       });
     }
-  }, [data?.adSegments]);
+  }, [data?.adSegments, autoSkip]);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
@@ -270,10 +361,42 @@ const App: React.FC = () => {
         {data && (
           <>
             {data.adSegments && data.adSegments.length > 0 && (
-              <AdMarker 
-                adSegments={data.adSegments}
-                onTimestampClick={handleTimestampClick}
-              />
+              <>
+                <FormControlLabel
+                  control={
+                    <Switch 
+                      checked={autoSkip}
+                      onChange={(e) => {
+                        const newValue = e.target.checked;
+                        setAutoSkip(newValue);
+                        
+                        // Immediately notify content script about the change
+                        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                          const tabId = tabs[0]?.id;
+                          if (tabId) {
+                            chrome.tabs.sendMessage(tabId, {
+                              action: 'setAutoSkip',
+                              enabled: newValue
+                            });
+                          }
+                        });
+                      }}
+                      color="error"
+                    />
+                  }
+                  label="Auto-skip ad segments"
+                  sx={{ 
+                    mb: 1,
+                    '& .MuiFormControlLabel-label': {
+                      fontSize: '0.875rem'
+                    }
+                  }}
+                />
+                <AdMarker 
+                  adSegments={data.adSegments}
+                  onTimestampClick={handleTimestampClick}
+                />
+              </>
             )}
             
             <SearchResults 
