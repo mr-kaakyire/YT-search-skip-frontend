@@ -6,7 +6,8 @@
   "permissions": [
     "activeTab",
     "scripting",
-    "storage"
+    "storage",
+    "commands"
   ],
   "host_permissions": [
     "https://www.youtube.com/*"
@@ -14,6 +15,17 @@
   "action": {
     "default_popup": "index.html",
     "default_icon": "icon16.png"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "windows": "Ctrl+Q",
+        "mac": "Command+Q",
+        "chromeos": "Ctrl+Q",
+        "linux": "Ctrl+Q"
+      },
+      "description": "Open YT Ad Skip"
+    }
   },
   "content_scripts": [
     {
