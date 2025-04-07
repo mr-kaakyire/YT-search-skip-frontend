@@ -7,6 +7,7 @@ import Alert from '@mui/material/Alert';
 import { SearchResults } from './components/SearchResults';
 import { SearchBar } from './components/SearchBar';
 import { AdMarker } from './components/AdMarker';
+import { TimelineMarker } from './components/TimelineMarker';
 import { useVideoData } from './utils/useVideoData';
 import { useThemeDetector } from './utils/useThemeDetector';
 
@@ -47,6 +48,20 @@ const App: React.FC = () => {
       }
     });
   }, []);
+
+  useEffect(() => {
+    if (data?.adSegments) {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tabId = tabs[0]?.id;
+        if (tabId) {
+          chrome.scripting.executeScript({
+            target: { tabId },
+            files: ['content.js']
+          });
+        }
+      });
+    }
+  }, [data?.adSegments]);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
@@ -102,10 +117,13 @@ const App: React.FC = () => {
         {data && (
           <>
             {data.adSegments && data.adSegments.length > 0 && (
-              <AdMarker 
-                adSegments={data.adSegments}
-                onTimestampClick={handleTimestampClick}
-              />
+              <>
+                <TimelineMarker adSegments={data.adSegments} />
+                <AdMarker 
+                  adSegments={data.adSegments}
+                  onTimestampClick={handleTimestampClick}
+                />
+              </>
             )}
             
             <SearchResults 

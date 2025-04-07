@@ -1,17 +1,18 @@
 import { useState } from 'react';
+import { cacheService } from './cache';
 
 interface TranscriptSegment {
   text: string;
   offset: number;
 }
 
-interface AdSegment {
+export interface AdSegment {
   start: number;
   end: number;
   text: string;
 }
 
-interface VideoData {
+export interface VideoData {
   transcript: TranscriptSegment[];
   adSegments: AdSegment[];
 }
@@ -32,6 +33,13 @@ export const useVideoData = (): UseVideoDataReturn => {
 
   const fetchData = async (videoId: string) => {
     try {
+      // Check cache first
+      const cachedData = cacheService.get(videoId);
+      if (cachedData) {
+        setData(cachedData);
+        return;
+      }
+
       setLoading(true);
       setError(null);
 
@@ -51,6 +59,9 @@ export const useVideoData = (): UseVideoDataReturn => {
       }
 
       const result = await response.json();
+      
+      // Cache the result
+      cacheService.set(videoId, result);
       setData(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unexpected error occurred');
