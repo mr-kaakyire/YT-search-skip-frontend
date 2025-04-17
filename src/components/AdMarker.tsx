@@ -21,13 +21,29 @@ interface AdSegment {
 interface AdMarkerProps {
   adSegments: AdSegment[];
   onTimestampClick: (timestamp: number) => void;
+  isExpanded?: boolean;
+  onExpandToggle?: () => void;
 }
 
-export const AdMarker: React.FC<AdMarkerProps> = ({ adSegments, onTimestampClick }) => {
-  const [expanded, setExpanded] = useState(true);
-
+export const AdMarker: React.FC<AdMarkerProps> = ({ 
+  adSegments, 
+  onTimestampClick,
+  isExpanded,
+  onExpandToggle
+}) => {
+  const [localExpanded, setLocalExpanded] = useState(true);
+  
+  // Use either the provided isExpanded or fall back to local state
+  const expanded = isExpanded !== undefined ? isExpanded : localExpanded;
+  
   const toggleExpanded = () => {
-    setExpanded(!expanded);
+    if (onExpandToggle) {
+      // If external control is provided, use that
+      onExpandToggle();
+    } else {
+      // Otherwise use local state
+      setLocalExpanded(!localExpanded);
+    }
   };
 
   // Calculate total ad time

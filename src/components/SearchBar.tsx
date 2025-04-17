@@ -37,7 +37,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, disabled }) => {
     <TextField
       fullWidth
       variant="outlined"
-      placeholder="Search in transcript..."
+      placeholder="Search word or phrase..."
       value={value}
       onChange={handleChange}
       disabled={disabled}
@@ -58,7 +58,14 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, disabled }) => {
               <ClearIcon />
             </IconButton>
           </InputAdornment>
-        ) : null,
+        ) : (
+          <InputAdornment position="end">
+            <svg width="24" height="16" viewBox="0 0 231 153" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="231" height="153" rx="37" fill="#444444"/>
+              <path d="M115.5 133C110.844 102.273 86.7268 78.1563 56 73.5C86.7268 68.8437 110.844 44.7268 115.5 14C120.156 44.7268 144.273 68.8437 175 73.5C144.273 78.1563 120.156 102.273 115.5 133Z" fill="white"/>
+            </svg>
+          </InputAdornment>
+        ),
       }}
       sx={{
         '& .MuiOutlinedInput-root': {

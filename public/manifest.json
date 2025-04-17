@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "YouTube Transcript Search & Ad Skip",
+  "name": "YTGenie",
   "version": "1.0.0",
-  "description": "Search through YouTube video transcripts and skip ads with ease",
+  "description": "Skip sponsored segments in YouTube videos and search for specific words or phrases to jump to relevant parts of the video."
+,
   "permissions": [
     "activeTab",
     "scripting",

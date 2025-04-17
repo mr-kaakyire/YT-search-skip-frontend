@@ -11,6 +11,33 @@
   // Track auto-skip state (default to false, will be updated from storage)
   window.ytAdSkipAutoSkip = false;
   
+  // Track current video ID
+  let currentVideoId = getVideoIdFromURL(window.location.href);
+  console.log('Initial video ID:', currentVideoId);
+  
+  // Helper function to get video ID from URL
+  function getVideoIdFromURL(url) {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.searchParams.get('v');
+    } catch (error) {
+      console.error('Error parsing URL:', error);
+      return null;
+    }
+  }
+  
+  // Clear all ad markers from the page
+  function clearAdMarkers() {
+    document.querySelectorAll('.yt-adskip-marker').forEach(marker => marker.remove());
+    console.log('Ad markers cleared');
+    
+    // Also hide skip button if it exists
+    const skipButton = document.querySelector('.yt-adskip-button');
+    if (skipButton) {
+      skipButton.style.display = 'none';
+    }
+  }
+
   // Load auto-skip setting from storage
   chrome.storage.sync.get(['autoSkipEnabled'], (result) => {
     if (result.autoSkipEnabled !== undefined) {
@@ -42,6 +69,59 @@
       adSegments = request.segments || [];
       console.log('Ad segments updated:', adSegments);
     }
+  });
+
+  // Monitor URL changes to detect navigation between videos
+  let lastCheckedPath = window.location.href;
+  
+  // Set up an interval to check for URL changes
+  const urlCheckInterval = setInterval(() => {
+    const currentPath = window.location.href;
+    
+    // If URL has changed
+    if (currentPath !== lastCheckedPath) {
+      lastCheckedPath = currentPath;
+      const newVideoId = getVideoIdFromURL(currentPath);
+      
+      // If we've navigated to a different video
+      if (newVideoId !== currentVideoId) {
+        console.log('Video changed from', currentVideoId, 'to', newVideoId);
+        currentVideoId = newVideoId;
+        
+        // Clear existing markers since they're for the previous video
+        clearAdMarkers();
+        
+        // Reset ad segments for the new video
+        adSegments = [];
+      }
+    }
+  }, 1000); // Check every second
+  
+  // Set up a mutation observer for SPA navigation (YouTube doesn't always refresh the page)
+  const videoChangeMutationObserver = new MutationObserver((mutations) => {
+    // Check if the URL has changed (YouTube uses History API)
+    const currentHref = window.location.href;
+    if (currentHref !== lastCheckedPath) {
+      lastCheckedPath = currentHref;
+      const newVideoId = getVideoIdFromURL(currentHref);
+      
+      if (newVideoId !== currentVideoId) {
+        console.log('Video changed via SPA navigation from', currentVideoId, 'to', newVideoId);
+        currentVideoId = newVideoId;
+        
+        // Clear existing markers
+        clearAdMarkers();
+        
+        // Reset ad segments for the new video
+        adSegments = [];
+      }
+    }
+  });
+  
+  // Start observing changes to the document body for YouTube's SPA navigation
+  videoChangeMutationObserver.observe(document.body, { 
+    childList: true, 
+    subtree: true 
   });
 
   // Add custom styles for the timeline markers, skip button, and notification
@@ -182,6 +262,7 @@
     // Clean up on unload
     window.addEventListener('beforeunload', () => {
       clearInterval(checkInterval);
+      clearInterval(urlCheckInterval);
     });
   };
   
@@ -193,6 +274,13 @@
       setupAutoSkip();
     }
   }, 1000);
+
+  // Global cleanup on page unload
+  window.addEventListener('beforeunload', () => {
+    clearInterval(urlCheckInterval);
+    clearInterval(videoSetupCheck);
+    videoChangeMutationObserver.disconnect();
+  });
 
   console.log('YT AdSkip content script loaded with auto-skip support');
 })(); 

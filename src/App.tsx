@@ -32,6 +32,7 @@ const App: React.FC = () => {
   const [videoId, setVideoId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [autoSkip, setAutoSkip] = useState<boolean>(false);
+  const [adMarkerExpanded, setAdMarkerExpanded] = useState(true);
   const isYouTubeDark = useThemeDetector();
   
   const theme = createTheme({
@@ -309,6 +310,14 @@ const App: React.FC = () => {
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
+    
+    // Collapse AdMarker when user starts typing
+    if (query.trim() !== '') {
+      setAdMarkerExpanded(false);
+    } else {
+      // Expand when search is cleared
+      setAdMarkerExpanded(true);
+    }
   };
 
   const handleTimestampClick = (timestamp: number) => {
@@ -395,12 +404,14 @@ const App: React.FC = () => {
                 <AdMarker 
                   adSegments={data.adSegments}
                   onTimestampClick={handleTimestampClick}
+                  isExpanded={adMarkerExpanded}
+                  onExpandToggle={() => setAdMarkerExpanded(!adMarkerExpanded)}
                 />
               </>
             )}
             
             <SearchResults 
-              transcript={data.transcript}
+              transcript={data?.transcript || []}
               searchQuery={searchQuery}
               onTimestampClick={handleTimestampClick}
             />
