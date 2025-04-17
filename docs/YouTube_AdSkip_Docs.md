@@ -977,7 +977,7 @@ The backend leverages Google's Gemini 2.0 Flash model for ad detection. The impl
 The backend requires the following environment variables:
 
 ```
-GEMINI_API_KEY=your_gemini_api_key
+GEMINI_API_KEY=<your_gemini_api_key>
 PORT=3000  # Optional, defaults to 3000
 ```
 
@@ -1646,7 +1646,7 @@ cd build && zip -r ../yt-adskip.zip *
 1. Create a production `.env` file:
 
 ```
-GEMINI_API_KEY=your_production_api_key
+GEMINI_API_KEY=<your_production_api_key>
 PORT=3000
 NODE_ENV=production
 ```
@@ -1708,7 +1708,7 @@ docker build -t yt-adskip-backend .
 
 # Run the container
 docker run -d -p 3000:3000 --name yt-adskip-api \
-  -e GEMINI_API_KEY=your_key \
+  -e GEMINI_API_KEY=<your_key> \
   yt-adskip-backend
 ```
 
@@ -2313,3 +2313,88 @@ The YouTube Ad Skip extension demonstrates the power of combining browser extens
 The extension's architecture provides a solid foundation for future development, with clear separation of concerns between the frontend, content scripts, and backend services. The optimization techniques ensure good performance, while the extensive testing and debugging strategies help maintain reliability.
 
 With the potential enhancements outlined above, the extension could evolve into an even more powerful tool for YouTube users, offering not just ad skipping but a comprehensive suite of features to improve video consumption. 
+
+## Frontend Documentation
+
+### Overview
+The YouTube AdSkip extension is designed to enhance the viewing experience by allowing users to skip ads in YouTube videos. It integrates seamlessly with YouTube's interface and provides a user-friendly way to manage ad skipping.
+
+### Main Components
+- **App.tsx**: The main application component that integrates various features such as theme detection, video data fetching, and ad marker management.
+- **SearchBar.tsx**: Provides a search interface for users to search within the video transcript.
+- **SearchResults.tsx**: Displays the results of transcript searches, highlighting relevant sections.
+- **AdMarker.tsx**: Manages the display of ad markers on the video timeline, allowing users to see where ads are located.
+
+### Utilities
+- **useVideoData.ts**: A custom React hook that fetches video data and manages caching to improve performance.
+- **useThemeDetector.ts**: Detects YouTube's current theme (dark or light) to ensure consistent styling.
+- **cache.ts**: Provides in-memory caching functionality to reduce redundant API calls.
+- **formatTime.ts**: Utility function for formatting time values in a user-friendly manner.
+- **debounce.ts**: Utility function to debounce rapid function calls, improving performance.
+
+### Styling and Theming
+The extension uses Material UI for consistent theming across components. It dynamically switches themes based on YouTube's current theme, ensuring a seamless user experience.
+
+### Chrome Extension Integration
+The frontend leverages Chrome APIs to manage tabs and storage, enabling communication between the extension and content scripts. This integration allows for real-time updates and settings management.
+
+## Backend Documentation
+
+### Overview
+The backend server processes video data and detects ad segments using AI models. It is built with Node.js and Express.js, providing a robust and scalable solution for handling video analysis requests.
+
+### Server Setup
+The server is configured using environment variables stored in a `.env` file. It requires a `GEMINI_API_KEY` for AI integration and optionally a `PORT` for server configuration.
+
+### API Endpoints
+- **/analyze-video**: The primary endpoint for analyzing video transcripts and detecting ad segments. It accepts a POST request with a YouTube video URL and returns the transcript along with identified ad segments.
+
+### AI Integration
+The backend leverages Google's Gemini 2.0 Flash model for ad detection. The AI model is prompted to identify common sponsorship phrases and returns structured JSON data with ad segments.
+
+### Helper Functions
+- **getVideoId**: Extracts the video ID from YouTube URLs to facilitate API requests.
+- **extractJSON**: Processes and validates AI responses, ensuring accurate extraction of ad segments.
+
+### Error Handling and Security
+The server includes comprehensive error handling strategies to manage API errors and malformed data. CORS is configured to ensure secure communication between the extension and the backend.
+
+### Environment Variables
+The backend requires the following environment variables:
+- `GEMINI_API_KEY`: API key for accessing the Gemini AI model.
+- `PORT`: Optional port configuration for the server, defaulting to 3000 if not specified.
+
+### Extension-Backend Communication
+
+The extension communicates with the backend through standard HTTP requests:
+
+1. **Request Flow**:
+   - Extension extracts video ID from YouTube URL
+   - Extension makes POST request to `/analyze-video` endpoint
+   - Backend processes the request and returns transcript and ad segments
+   - Extension displays results and injects markers into the YouTube player
+
+2. **Security Considerations**:
+   - CORS is configured to restrict access to the extension only
+   - API key is kept securely on the server side
+   - Request validation ensures proper data format
+
+3. **Data Format**:
+   ```javascript
+   // Example response from backend
+   {
+     "transcript": [
+       { "text": "welcome to this video", "offset": 0.5 },
+       { "text": "today we're going to talk about", "offset": 2.1 },
+       // ... more transcript segments ...
+     ],
+     "adSegments": [
+       { 
+         "start": 120.5, 
+         "end": 150.2, 
+         "text": "this video is sponsored by Example Corp" 
+       },
+       // ... more ad segments ...
+     ]
+   }
+   ``` 
