@@ -1,7 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-  <rect width="16" height="16" fill="#FF0000"/>
-  <rect x="3" y="4" width="10" height="1.5" fill="white"/>
-  <rect x="3" y="7.25" width="10" height="1.5" fill="white"/>
-  <rect x="3" y="10.5" width="10" height="1.5" fill="white"/>
-</svg> 
+<svg width="231" height="153" viewBox="0 0 231 153" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="231" height="153" rx="37" fill="#FF0033"/>
+<path d="M115.5 133C110.844 102.273 86.7268 78.1563 56 73.5C86.7268 68.8437 110.844 44.7268 115.5 14C120.156 44.7268 144.273 68.8437 175 73.5C144.273 78.1563 120.156 102.273 115.5 133Z" fill="white"/>
+</svg>

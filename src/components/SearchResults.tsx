@@ -38,19 +38,20 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
   
   const filteredResults = useMemo(() => {
     if (!searchQuery) return [];
+    if (!transcript || !Array.isArray(transcript) || transcript.length === 0) return [];
 
     const query = searchQuery.toLowerCase();
     const results: (TranscriptSegment & { context: string })[] = [];
     const contextSize = 2; // Number of segments before and after for context
 
     transcript.forEach((segment, index) => {
-      if (segment.text.toLowerCase().includes(query)) {
+      if (segment && segment.text && typeof segment.text === 'string' && segment.text.toLowerCase().includes(query)) {
         // Get surrounding segments for context
         const start = Math.max(0, index - contextSize);
         const end = Math.min(transcript.length - 1, index + contextSize);
         
         const contextSegments = transcript.slice(start, end + 1);
-        const context = contextSegments.map(s => s.text).join(' ');
+        const context = contextSegments.map(s => s && s.text ? s.text : '').join(' ');
 
         results.push({
           ...segment,
@@ -153,7 +154,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
         }}
         onClick={toggleExpanded}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', gap:"0.8rem", alignItems: 'center' }}>
           <Typography variant="subtitle2" sx={{ mr: 1 }}>
             Search Results
           </Typography>
@@ -177,14 +178,30 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
           disablePadding
           sx={{ 
             maxHeight: 400,
-            overflow: 'auto'
+            overflow: 'auto',
+            '&::-webkit-scrollbar': {
+              width: '8px',
+            },
+            '&::-webkit-scrollbar-track': {
+              background: 'rgba(0, 0, 0, 0.05)',
+              borderRadius: '4px',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              background: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.2)',
+              borderRadius: '4px',
+              '&:hover': {
+                background: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.3)',
+              }
+            }
           }}
         >
           {filteredResults.map((result, index) => {
-            const highlightedText = result.context.replace(
-              new RegExp(searchQuery, 'gi'),
-              match => `<mark>${match}</mark>`
-            );
+            const highlightedText = result.context && typeof result.context === 'string' 
+              ? result.context.replace(
+                  new RegExp(searchQuery, 'gi'),
+                  match => `<mark>${match}</mark>`
+                )
+              : '';
 
             return (
               <ListItem 
@@ -214,10 +231,10 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                 <Button
                   size="small"
                   variant="text"
-                  onClick={() => onTimestampClick(result.offset)}
+                  onClick={() => result.offset !== undefined ? onTimestampClick(result.offset) : null}
                   sx={{ alignSelf: 'flex-end' }}
                 >
-                  Jump to {formatTime(result.offset)}
+                  Jump to {formatTime(result.offset || 0)}
                 </Button>
               </ListItem>
             );
